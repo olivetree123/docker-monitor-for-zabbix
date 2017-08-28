@@ -10,8 +10,8 @@ logging.basicConfig(filename="/var/log/docker-monitor.log", level=logging.INFO)
 
 ZABBIX_HOST = "10.1.7.6"
 SERVER_NAME = "cloudclass.h3c.com"
-KEY_PREFIX = "docker.gaojian"
 
+KEY_PREFIX = "docker.gaojian"
 FUNCTIONS = ["list_container", "get_metric"]
 
 DOCKER_LIST_COMMAND = "sudo docker ps -a|grep -v 'CONTAINER ID'|awk '{print $NF}'"
@@ -41,7 +41,7 @@ class Docker(object):
     def memory_used(self, docker_name):
         _, res = exec_command(CONTAINER_STATUS_COMMAND.format(docker_name))
         res = res.split("\n")[:-1]
-        result = []
+        result = 0
         for r in res:
             r = re.match(DOCKER_STATS_REG, r)
             r = r.groupdict()
@@ -49,6 +49,17 @@ class Docker(object):
                 result = self.unit_convert(r["memory_used"])
                 break
         return result
+
+    def docker_memory_used(self):
+        _, res = exec_command(CONTAINER_STATUS_COMMAND.format(""))
+        res = res.split("\n")[:-1]
+        result = 0
+        for r in res:
+            r = re.match(DOCKER_STATS_REG, r)
+            r = r.groupdict()
+            result += self.unit_convert(r["memory_used"])
+        return result
+
 
     def send_data(self, key, value):
         command_line = "zabbix_sender -z {} -s {} -k {} -o '{}' -vv".format(ZABBIX_HOST, SERVER_NAME, key, value)
@@ -59,7 +70,7 @@ class Docker(object):
         """Convert To MiB"""
         if len(value) < 4:
             logging.error("string length not enough, string = {}".format(value))
-            raise ValueError
+            return 0
         i, unit = float(value[:-3]), value[-3:]
         if unit == "GiB":
             i = i*1024
@@ -77,24 +88,28 @@ def main():
     parser.add_option('--name', help='Docker name', default='')
     (options, args) = parser.parse_args()
     func = options.func
-    if func not in FUNCTIONS:
-        return
     docker = Docker()
     if func == "list_container":
         containers = docker.list_container()
         containers = [{"{#CONTAINERNAME}":c} for c in containers]
         result = json.dumps({"data":containers})
         print(result)
-        docker.send_data("docker.gaojian.discovery", result)
         return
     metric = options.metric
-    name = options.name
-
     if metric == "memory_used":
+        name = options.name
         value = docker.memory_used(name)
         key = "{}.{}[{}]".format(KEY_PREFIX, metric, name)
-        print(key, value)
-        docker.send_data(key, value)
+        logging.info(key)
+        logging.info(value)
+        print(value)
+    elif metric == "docker_memory_used":
+        key = "docker.gaojian.docker_memory_used"
+        value = docker.docker_memory_used()
+        logging.info(key)
+        logging.info(value)
+        print(value)
+
     else:
         pass
 
